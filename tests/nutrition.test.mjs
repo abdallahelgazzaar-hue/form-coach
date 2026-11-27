@@ -119,3 +119,60 @@ test('share report includes targets and disclaimer', () => {
   assert.match(t2, /No targets shown/);
   assert.doesNotMatch(t2, /kcal/);
 });
+
+import { checkMeal, dayTotals, resolveItem, MEAL_IDEAS } from '../nutrition.js';
+import { FOODS, findFood } from '../foods.js';
+
+test('every meal slot offers at least 8 ideas, at least 5 vegetarian', () => {
+  for (const [slot, ideas] of Object.entries(MEAL_IDEAS)) {
+    assert.ok(ideas.length >= 8, slot);
+    assert.ok(ideas.filter((i) => i.veg).length >= 5, slot);
+  }
+});
+
+test('food list values are internally consistent', () => {
+  for (const f of FOODS) {
+    // Energy from macros (4/4/9) should be close to stated kcal; fibre and rounding explain small gaps.
+    const est = f.protein * 4 + f.carbs * 4 + f.fat * 9;
+    assert.ok(Math.abs(est - f.kcal) < Math.max(0.2 * f.kcal, 10), `${f.name}: ${f.kcal} vs ${Math.round(est)}`);
+  }
+  assert.equal(new Set(FOODS.map((f) => f.name)).size, FOODS.length);
+});
+
+test('food lookup: names, aliases, unique partials; unsure returns null', () => {
+  assert.equal(findFood('rice').name, 'Rice, white, cooked');
+  assert.equal(findFood('Chicken breast, cooked').protein, 31);
+  assert.equal(findFood('ful').name, 'Fava beans (ful medames), cooked');
+  assert.equal(findFood('halloum').name, 'Halloumi');
+  assert.equal(findFood('bread'), null); // several breads: user must pick
+  assert.equal(findFood('mango lassi'), null);
+});
+
+test('resolveItem handles weights and label values for unknown foods', () => {
+  const r = resolveItem({ name: 'chicken', grams: 150 });
+  assert.equal(Math.round(r.protein), 47);
+  assert.equal(resolveItem({ name: 'chicken', grams: '' }).reason, 'grams');
+  assert.equal(resolveItem({ name: 'mum\'s stew', grams: 200 }).reason, 'unknown');
+  const c = resolveItem({ name: 'mum\'s stew', grams: 200, kcal100: '120', protein100: '8' });
+  assert.ok(c.ok && c.custom && c.kcal === 240 && c.protein === 16);
+});
+
+test('checkMeal flags low protein and suggests fixes that fit the calories', () => {
+  const target = { kcal: 700, protein: 40 };
+  const c = checkMeal([{ name: 'rice', grams: 250 }, { name: 'mixed vegetables', grams: 150 }], target);
+  assert.equal(c.proteinStatus, 'low');
+  assert.equal(c.suggestions.length, 3);
+  assert.ok(c.suggestions.every((s) => s.protein >= 40 - c.protein));
+  const veg = checkMeal([{ name: 'rice', grams: 250 }], target, { vegetarian: true });
+  assert.ok(veg.suggestions.every((s) => !/chicken|tuna|fish/i.test(s.name)));
+  const ok = checkMeal([{ name: 'rice', grams: 200 }, { name: 'chicken', grams: 130 }, { name: 'salad', grams: 100 }, { name: 'olive oil', grams: 10 }], target);
+  assert.ok(ok.good, JSON.stringify(ok));
+  const over = checkMeal([{ name: 'pizza', grams: 400 }], target);
+  assert.equal(over.kcalStatus, 'high');
+  assert.ok(checkMeal([], target).empty);
+});
+
+test('dayTotals adds only meals with valid items', () => {
+  const t = dayTotals({ breakfast: [{ name: 'egg', grams: 100 }], lunch: [{ name: '', grams: '' }], dinner: [] });
+  assert.deepEqual(t, { kcal: 143, protein: 13, mealsEntered: 1 });
+});

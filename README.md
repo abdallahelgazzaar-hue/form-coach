@@ -11,7 +11,8 @@ Pose estimation runs fully on the device (MediaPipe Pose Landmarker "lite", WebA
 | `vendor/` | MediaPipe library, WASM runtime and pose model (bundled, ~15 MB, no CDN at runtime) |
 | `feedback.js` | Tester survey: questions, validation, fixed-format report |
 | `nutrition.js` | Body assessment, health screening, calorie/protein targets, meal ideas (pure logic, no DOM; `assess(profile)` is the entry point later phases call) |
-| `tests/nutrition.test.mjs` | 13 tests: formulas against hand calculations, guard rails, screening, validation |
+| `foods.js` | 73 common foods with kcal, protein, carbs, fat per 100 g (USDA FoodData Central, Australian Food Composition Database, rounded), name/alias lookup |
+| `tests/nutrition.test.mjs` | 19 tests: formulas against hand calculations, guard rails, screening, validation |
 | `tests/engine.test.mjs` | 8 logic tests with synthetic skeletons |
 
 Run all tests: `npm test`.
@@ -62,5 +63,6 @@ After each set, testers tap **Send tester feedback** on the summary screen (or *
 - Metric units only.
 - BMI bands are the general WHO ones; Asian and South Asian populations have health risk at lower BMI (23+). Not adjusted yet.
 - Sex options are male/female because the formula needs one of the two.
-- Meal ideas are fixed examples with approximate protein, not a meal plan.
+- Meal ideas (10 to 11 per meal) are alternatives with approximate protein, not a meal plan; the screen says to pick one or combine two.
+- **Check what I eat** (per meal): users add foods with weights; built-in foods are matched by name or alias, anything else needs kcal and protein per 100 g from the pack label. Values for home recipes and restaurant food vary widely, so results are estimates. Status: under 80% of the meal target = low, over 120% calories = high. Protein gaps get one suggestion each from meat/fish, dairy/eggs and plant foods (vegetarian: dairy/eggs, plant, protein powder). Entries are saved on the phone only when "Remember" is ticked and are removed by the delete button.
 - **The wording and thresholds have not yet been reviewed by an accredited dietitian.** This review is on the roadmap before testers see the module.
