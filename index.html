@@ -25,6 +25,15 @@
   .ex { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: var(--panel);
     border: 2px solid transparent; text-align: left; }
   .ex[aria-pressed="true"] { border-color: var(--accent); background: var(--panel-2); }
+  .demo-card { background: var(--panel); border-radius: 14px; padding: 12px 14px 14px; }
+  .demo-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .demo-head b { font-size: 15px; }
+  .seg { display: inline-flex; background: var(--bg); border-radius: 10px; padding: 3px; }
+  .seg-btn { padding: 6px 12px; border-radius: 8px; background: none; font-size: 13px; color: var(--muted); }
+  .seg-btn[aria-pressed="true"] { background: var(--panel-2); color: var(--text); font-weight: 700; }
+  .demo-stage { margin: 8px auto 0; background: var(--bg); border-radius: 12px; aspect-ratio: 220 / 190; max-height: 260px; display: grid; place-items: center; overflow: hidden; }
+  .demo-svg { width: 100%; height: 100%; display: block; }
+  .demo-points { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; line-height: 1.55; }
   .ex-group { margin: 8px 2px 0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .ex .icon { width: 44px; height: 44px; border-radius: 12px; background: #24364a; display: grid; place-items: center; flex: none; }
   .ex b { display: block; font-size: 17px; }
@@ -181,6 +190,18 @@
     </button>
   </div>
 
+  <div class="demo-card">
+    <div class="demo-head">
+      <b>Correct form</b>
+      <div class="seg" role="group" aria-label="Demo figure">
+        <button type="button" class="seg-btn" data-sex="male" aria-pressed="true">Male</button>
+        <button type="button" class="seg-btn" data-sex="female" aria-pressed="false">Female</button>
+      </div>
+    </div>
+    <div id="demoStage" class="demo-stage"></div>
+    <ul id="demoPoints" class="demo-points"></ul>
+  </div>
+
   <div class="setup" id="setupTips"></div>
 
   <div class="row">
@@ -266,6 +287,7 @@
 <script type="module">
 import { Analyzer } from './engine.js';
 import { questionsFor, buildReport, validate } from './feedback.js';
+import { mountDemo } from './demo.js';
 import { ACTIVITY, GOALS, screeningFor, validateProfile, assess, mealPlan, DISCLAIMER, buildNutritionReport, PROFILE_VERSION, checkMeal, dayTotals, resolveItem } from './nutrition.js';
 import { FOODS, PORTION_TIPS } from './foods.js';
 
@@ -302,7 +324,10 @@ const $ = (id) => document.getElementById(id);
 const state = { exercise: 'squat', facing: 'user', voice: true, landmarker: null, stream: null, analyzer: null,
   running: false, lastVideoTime: -1, lastCueAt: 0, lastSpoken: '', raf: 0 };
 
-function show(id) { for (const s of document.querySelectorAll('.screen')) s.classList.toggle('active', s.id === id); }
+function show(id) {
+  for (const s of document.querySelectorAll('.screen')) s.classList.toggle('active', s.id === id);
+  if (id === 'start') refreshDemo(); else demo?.stop();
+}
 
 // ----- Start screen controls -----
 for (const b of document.querySelectorAll('.ex')) {
@@ -310,11 +335,40 @@ for (const b of document.querySelectorAll('.ex')) {
     state.exercise = b.dataset.ex;
     for (const o of document.querySelectorAll('.ex')) o.setAttribute('aria-pressed', String(o === b));
     $('setupTips').innerHTML = TIPS[state.exercise];
+    refreshDemo();
     // Standing exercises default to the front camera so you can see yourself; floor and bench work to the rear one.
     setFacing(['squat', 'curl', 'pushdown'].includes(state.exercise) ? 'user' : 'environment');
   });
 }
 $('setupTips').innerHTML = TIPS.squat;
+
+// ----- Form demo (animated figure) -----
+// Figure choice: the demo's own saved choice, else the sex entered in Body & diet, else male.
+const DEMO_SEX_KEY = 'fc.demoSex';
+function initialDemoSex() {
+  try {
+    const own = localStorage.getItem(DEMO_SEX_KEY);
+    if (own === 'male' || own === 'female') return own;
+    const prof = JSON.parse(localStorage.getItem('fc.profile') || 'null');
+    if (prof?.data?.sex === 'male' || prof?.data?.sex === 'female') return prof.data.sex;
+  } catch { /* storage unavailable */ }
+  return 'male';
+}
+state.demoSex = initialDemoSex();
+const demo = mountDemo($('demoStage'));
+function refreshDemo() {
+  for (const b of document.querySelectorAll('.seg-btn')) b.setAttribute('aria-pressed', String(b.dataset.sex === state.demoSex));
+  const pts = demo.set(state.exercise, state.demoSex);
+  $('demoPoints').replaceChildren(...pts.map((t) => { const li = document.createElement('li'); li.textContent = t; return li; }));
+}
+for (const b of document.querySelectorAll('.seg-btn')) {
+  b.addEventListener('click', () => {
+    state.demoSex = b.dataset.sex;
+    try { localStorage.setItem(DEMO_SEX_KEY, state.demoSex); } catch { /* private mode */ }
+    refreshDemo();
+  });
+}
+refreshDemo();
 function setFacing(f) {
   state.facing = f;
   $('camLabel').textContent = f === 'user' ? 'Front' : 'Rear';
@@ -901,7 +955,7 @@ async function shareNutrition() {
 if (location.hash === '#nutrition') openNutrition();
 
 // Test hook (used by automated checks only).
-window.__formCoach = { state, render, renderSummary, openFeedback, nu, openNutrition };
+window.__formCoach = { state, render, renderSummary, openFeedback, nu, openNutrition, demo };
 </script>
 </body>
 </html>
