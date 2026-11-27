@@ -59,7 +59,41 @@ export const RULES = {
     lineBad: 155,
     maxBodyTilt: 35,
   },
+  // ---- Weights (side view). Thresholds are assumptions; tune with tester data. ----
+  curl: {                  // standing dumbbell biceps curl
+    restElbow: 145,        // arm extended at the bottom
+    startElbow: 120,       // below this = rep in progress
+    topGood: 55,           // elbow angle at the top of the curl
+    topOk: 70,
+    armWarn: 20,           // upper arm angle from vertical (elbow drifting forward)
+    armBad: 30,
+    swingWarn: 10,         // torso lean change during the rep (body swing)
+    swingBad: 16,
+  },
+  bench: {                 // barbell bench press, lying side-on to the camera
+    lockElbow: 155,        // arms locked out at the top
+    startElbow: 135,
+    depthGood: 90,         // elbow angle with the bar at the chest
+    depthOk: 105,
+    forearmWarn: 20,       // forearm angle from vertical at the bottom (wrist not stacked over elbow)
+    forearmBad: 30,
+    hipLiftBad: 0.18,      // hip raised above the shoulder-knee line, as a fraction of torso length
+    maxBodyTilt: 35,
+  },
+  pushdown: {              // cable triceps pushdown, standing side-on
+    topElbow: 110,         // elbows bent at the start position
+    startElbow: 130,
+    lockGood: 160,         // full extension at the bottom
+    lockOk: 148,
+    armWarn: 20,           // upper arm should stay pinned to the side
+    armBad: 30,
+    swingWarn: 10,
+    swingBad: 16,
+  },
 };
+
+/** Exercises scored by reps (everything except timed holds). */
+export const REP_EXERCISES = ['squat', 'pushup', 'curl', 'bench', 'pushdown'];
 
 const VIS_MIN = 0.5;
 
@@ -105,7 +139,7 @@ export class Analyzer {
   }
 
   reset() {
-    this.phase = 'up';
+    this.phase = this.exercise === 'pushdown' ? 'idle' : this.exercise === 'curl' ? 'rest' : 'up';
     this.reps = 0;
     this.validReps = 0;
     this.repLog = [];
@@ -114,6 +148,7 @@ export class Analyzer {
     this.totalMs = 0;         // plank: time in position
     this.lastT = null;
     this.faultCounts = {};
+    this.restLean = null;
     this.sm.reset();
   }
 
@@ -122,7 +157,8 @@ export class Analyzer {
     this.lastT = tMs;
     if (!landmarks) return { ready: false, cue: 'Step into the frame so your whole body is visible.' };
     const { side, p } = pick(landmarks, w, h);
-    const fn = { squat: this.squat, pushup: this.pushup, plank: this.plank }[this.exercise];
+    const fn = { squat: this.squat, pushup: this.pushup, plank: this.plank,
+      curl: this.curl, bench: this.bench, pushdown: this.pushdown }[this.exercise];
     const out = fn.call(this, p, dt);
     out.side = side;
     out.points = p;
@@ -261,6 +297,181 @@ export class Analyzer {
     const joints = { hip: status, shoulder: 'good', knee: status, ankle: 'good', elbow: 'good' };
     return this.result({ phase: status === 'bad' ? 'paused' : 'holding', metrics: { line, tilt }, checks, joints, cue,
       hold: { holdMs: this.holdMs, totalMs: this.totalMs } });
+  }
+
+  // ---------- Dumbbell biceps curl (standing, side view) ----------
+  curl(p) {
+    const r = this.r;
+    if (!visible(p, ['shoulder', 'elbow', 'wrist', 'hip'])) {
+      return { ready: false, cue: 'Stand side-on so your shoulder, elbow, wrist and hip are visible.' };
+    }
+    const elbow = this.sm.push('elbow', angle(p.shoulder, p.elbow, p.wrist));
+    const arm = this.sm.push('arm', fromVertical(p.shoulder, p.elbow));
+    const lean = this.sm.push('lean', fromVertical(p.hip, p.shoulder));
+
+    const armStatus = arm > r.armBad ? 'bad' : arm > r.armWarn ? 'warn' : 'good';
+    const swing = this.cur ? Math.abs(lean - this.cur.lean0) : 0;
+    const swingStatus = swing > r.swingBad ? 'bad' : swing > r.swingWarn ? 'warn' : 'good';
+    const checks = [
+      { id: 'arm', label: 'Elbow pinned', status: armStatus, value: arm,
+        cue: armStatus === 'good' ? null : 'Keep your elbow at your side; don\'t let it drift forward.' },
+      { id: 'swing', label: 'No swing', status: swingStatus, value: swing,
+        cue: swingStatus === 'good' ? null : 'Stop swinging: keep your torso still and lift with the arm.' },
+    ];
+
+    let repEvent = null;
+    if (this.phase !== 'down' && this.phase !== 'lift' && elbow > r.restElbow) this.phase = 'down';
+    if (this.phase === 'down' && elbow < r.startElbow) {
+      this.phase = 'lift';
+      // Swing is measured against the torso angle at rest, since a swing often starts with the rep itself.
+      this.cur = { minElbow: elbow, maxArm: arm, lean0: this.restLean ?? lean, maxSwing: 0 };
+    } else if (this.phase === 'lift') {
+      this.cur.minElbow = Math.min(this.cur.minElbow, elbow);
+      this.cur.maxArm = Math.max(this.cur.maxArm, arm);
+      this.cur.maxSwing = Math.max(this.cur.maxSwing, swing);
+      if (elbow > r.restElbow) {
+        const c = this.cur, faults = [];
+        if (c.minElbow > r.topOk) faults.push('Partial curl: bring the weight all the way up.');
+        else if (c.minElbow > r.topGood) faults.push('Almost there: squeeze a little higher.');
+        if (c.maxArm > r.armBad) faults.push('Elbow drifted forward during the rep.');
+        if (c.maxSwing > r.swingBad) faults.push('Body swing: you used momentum.');
+        const score = Math.round(0.4 * scoreBand(c.minElbow, r.topGood, r.topOk + 15, true)
+          + 0.3 * scoreBand(c.maxArm, r.armWarn, r.armBad + 10, true)
+          + 0.3 * scoreBand(c.maxSwing, r.swingWarn, r.swingBad + 8, true));
+        repEvent = this.finishRep(score, c.minElbow <= r.topOk && c.maxArm <= r.armBad && c.maxSwing <= r.swingBad, faults,
+          { minElbow: c.minElbow, maxArm: c.maxArm, maxSwing: c.maxSwing });
+        this.phase = 'down';
+        this.cur = null;
+      }
+    }
+    const inRep = this.phase === 'lift';
+    if (!inRep) this.restLean = lean;
+    const top = inRep ? (Math.min(this.cur.minElbow, elbow) <= r.topGood ? 'good' : Math.min(this.cur.minElbow, elbow) <= r.topOk ? 'warn' : 'bad') : 'good';
+    checks.push({ id: 'range', label: 'Range', status: inRep ? top : 'good', value: elbow, cue: null });
+    const joints = { elbow: inRep ? top : 'good', shoulder: armStatus, hip: swingStatus, knee: 'good', ankle: 'good' };
+    const cue = checks.find((c) => c.cue)?.cue ?? null;
+    return this.result({ phase: this.phase, metrics: { elbow, arm, lean }, checks, joints, cue, repEvent,
+      goodCue: inRep ? 'Good. Lower it slowly.' : 'Good form. Curl up.' });
+  }
+
+  // ---------- Barbell bench press (lying, side view) ----------
+  bench(p) {
+    const r = this.r;
+    if (!visible(p, ['shoulder', 'elbow', 'wrist', 'hip'])) {
+      return { ready: false, cue: 'Place the phone side-on at bench height so your arm, shoulder and hip are visible.' };
+    }
+    const tilt = 90 - fromVertical(p.shoulder, p.hip);
+    if (tilt > r.maxBodyTilt) return { ready: false, cue: 'Lie on the bench, side-on to the camera.' };
+    const elbow = this.sm.push('elbow', angle(p.shoulder, p.elbow, p.wrist));
+    const forearm = this.sm.push('forearm', fromVertical(p.elbow, p.wrist));
+    // Hip lift: hip above the shoulder-knee line (needs the knee; otherwise skipped).
+    let lift = 0;
+    if (p.knee.v >= 0.5) {
+      const torso = Math.hypot(p.hip.x - p.shoulder.x, p.hip.y - p.shoulder.y) || 1;
+      const d = sideOfLine(p.shoulder, p.knee, p.hip);
+      const above = lineFaultName(d, p.shoulder, p.knee) === 'pike';
+      lift = this.sm.push('lift', above ? Math.abs(d) / torso : 0);
+    }
+    const liftStatus = lift > r.hipLiftBad ? 'bad' : 'good';
+    const inRep = this.phase === 'down';
+    const forearmStatus = !inRep ? 'good' : forearm > r.forearmBad ? 'bad' : forearm > r.forearmWarn ? 'warn' : 'good';
+    const checks = [
+      { id: 'hips', label: 'Hips on bench', status: liftStatus, value: lift * 100,
+        cue: liftStatus === 'good' ? null : 'Keep your hips on the bench.' },
+      { id: 'forearm', label: 'Wrists over elbows', status: forearmStatus, value: forearm,
+        cue: forearmStatus === 'good' ? null : 'Stack your wrists over your elbows; adjust your grip width.' },
+    ];
+    let depthStatus = 'good';
+    if (inRep && this.cur) {
+      const best = Math.min(this.cur.minElbow, elbow);
+      depthStatus = best <= r.depthGood ? 'good' : best <= r.depthOk ? 'warn' : 'bad';
+    }
+    checks.push({ id: 'depth', label: 'Depth', status: inRep ? depthStatus : 'good', value: elbow, cue: null });
+
+    let repEvent = null;
+    if (this.phase === 'up' && elbow < r.startElbow) {
+      this.phase = 'down';
+      this.cur = { minElbow: elbow, maxForearmBottom: forearm, maxLift: lift };
+    } else if (this.phase === 'down') {
+      const c = this.cur;
+      if (elbow < c.minElbow) { c.minElbow = elbow; c.maxForearmBottom = forearm; }
+      c.maxLift = Math.max(c.maxLift, lift);
+      if (elbow > r.lockElbow) {
+        const faults = [];
+        if (c.minElbow > r.depthOk) faults.push('Too shallow: lower the bar to your chest.');
+        else if (c.minElbow > r.depthGood) faults.push('Almost there: bring the bar a little lower.');
+        if (c.maxForearmBottom > r.forearmBad) faults.push('Wrists not stacked over elbows at the bottom.');
+        if (c.maxLift > r.hipLiftBad) faults.push('Hips came off the bench.');
+        const score = Math.round(0.5 * scoreBand(c.minElbow, r.depthGood, r.depthOk + 15, true)
+          + 0.25 * scoreBand(c.maxForearmBottom, r.forearmWarn, r.forearmBad + 10, true)
+          + 0.25 * (c.maxLift > r.hipLiftBad ? 0 : 100));
+        repEvent = this.finishRep(score, c.minElbow <= r.depthOk && c.maxLift <= r.hipLiftBad, faults,
+          { minElbow: c.minElbow, forearm: c.maxForearmBottom, lift: c.maxLift });
+        this.phase = 'up';
+        this.cur = null;
+      }
+    }
+    const joints = { elbow: inRep ? depthStatus : 'good', shoulder: forearmStatus, hip: liftStatus, knee: 'good', ankle: 'good' };
+    const cue = checks.find((c) => c.cue)?.cue ?? null;
+    return this.result({ phase: this.phase, metrics: { elbow, forearm, lift }, checks, joints, cue, repEvent,
+      goodCue: inRep ? 'Good. Press up to lockout.' : 'Good form. Lower under control.' });
+  }
+
+  // ---------- Cable triceps pushdown (standing, side view) ----------
+  pushdown(p) {
+    const r = this.r;
+    if (!visible(p, ['shoulder', 'elbow', 'wrist', 'hip'])) {
+      return { ready: false, cue: 'Stand side-on so your shoulder, elbow, wrist and hip are visible.' };
+    }
+    const elbow = this.sm.push('elbow', angle(p.shoulder, p.elbow, p.wrist));
+    const arm = this.sm.push('arm', fromVertical(p.shoulder, p.elbow));
+    const lean = this.sm.push('lean', fromVertical(p.hip, p.shoulder));
+    const armStatus = arm > r.armBad ? 'bad' : arm > r.armWarn ? 'warn' : 'good';
+    const swing = this.cur ? Math.abs(lean - this.cur.lean0) : 0;
+    const swingStatus = swing > r.swingBad ? 'bad' : swing > r.swingWarn ? 'warn' : 'good';
+    const checks = [
+      { id: 'arm', label: 'Elbows pinned', status: armStatus, value: arm,
+        cue: armStatus === 'good' ? null : 'Pin your elbows to your sides; only the forearms move.' },
+      { id: 'swing', label: 'Torso still', status: swingStatus, value: swing,
+        cue: swingStatus === 'good' ? null : 'Don\'t lean into it: keep your torso still.' },
+    ];
+
+    let repEvent = null;
+    // 'idle' until the first bent-arm start position, so a hanging arm at setup is not counted.
+    if ((this.phase === 'up' || this.phase === 'idle') && elbow < r.topElbow) this.phase = 'ready';
+    if (this.phase === 'ready' && elbow > r.startElbow) {
+      this.phase = 'press';
+      this.cur = { maxElbow: elbow, maxArm: arm, lean0: this.restLean ?? lean, maxSwing: 0 };
+    } else if (this.phase === 'press') {
+      const c = this.cur;
+      c.maxElbow = Math.max(c.maxElbow, elbow);
+      c.maxArm = Math.max(c.maxArm, arm);
+      c.maxSwing = Math.max(c.maxSwing, swing);
+      if (elbow < r.topElbow) {
+        const faults = [];
+        if (c.maxElbow < r.lockOk) faults.push('Partial rep: straighten your arms fully at the bottom.');
+        else if (c.maxElbow < r.lockGood) faults.push('Almost there: lock out a little more.');
+        if (c.maxArm > r.armBad) faults.push('Elbows moved away from your sides.');
+        if (c.maxSwing > r.swingBad) faults.push('Torso swing: you used body weight.');
+        const score = Math.round(0.4 * scoreBand(c.maxElbow, r.lockGood, r.lockOk - 15, false)
+          + 0.3 * scoreBand(c.maxArm, r.armWarn, r.armBad + 10, true)
+          + 0.3 * scoreBand(c.maxSwing, r.swingWarn, r.swingBad + 8, true));
+        repEvent = this.finishRep(score, c.maxElbow >= r.lockOk && c.maxArm <= r.armBad && c.maxSwing <= r.swingBad, faults,
+          { maxElbow: c.maxElbow, maxArm: c.maxArm, maxSwing: c.maxSwing });
+        this.phase = 'ready';
+        this.cur = null;
+      }
+    }
+    const inRep = this.phase === 'press';
+    if (!inRep) this.restLean = lean;
+    let lockStatus = 'good';
+    if (inRep) { const b = Math.max(this.cur.maxElbow, elbow); lockStatus = b >= r.lockGood ? 'good' : b >= r.lockOk ? 'warn' : 'bad'; }
+    checks.push({ id: 'range', label: 'Lockout', status: inRep ? lockStatus : 'good', value: elbow, cue: null });
+    const joints = { elbow: inRep ? lockStatus : 'good', shoulder: armStatus, hip: swingStatus, knee: 'good', ankle: 'good' };
+    const cue = checks.find((c) => c.cue)?.cue ?? null;
+    return this.result({ phase: this.phase, metrics: { elbow, arm, lean }, checks, joints, cue, repEvent,
+      goodCue: this.phase === 'idle' || this.phase === 'up' ? 'Grip the bar with elbows bent at your sides.'
+        : inRep ? 'Good. Return slowly.' : 'Good form. Push down.' });
   }
 
   finishRep(score, valid, faults, stats) {
