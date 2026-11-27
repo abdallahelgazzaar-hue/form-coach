@@ -27,6 +27,9 @@ Live (GitHub Pages): https://abdallahelgazzaar-hue.github.io/form-coach/ . Camer
 | Squat | Knee angle hip-knee-ankle; torso angle from vertical | Valid rep: knee ≤ 115° at bottom (≤ 100° = full score); lean ≤ 55° |
 | Push-up | Elbow angle; shoulder-hip-ankle line | Valid rep: elbow ≤ 110° (≤ 95° = full score); body line ≥ 155°; sag vs pike detected |
 | Plank | Shoulder-hip-ankle line | ≥ 165° good, 155–165° warn, < 155° pauses the hold timer |
+| Dumbbell curl | Elbow angle; upper arm from vertical; torso angle change vs rest | Valid rep: elbow ≤ 70° at top (≤ 55° = full score); upper arm ≤ 30°; torso swing ≤ 16° |
+| Bench press | Elbow angle; forearm from vertical at the bottom; hip height vs shoulder-knee line | Valid rep: elbow ≤ 105° at the bottom (≤ 90° = full score) and lockout ≥ 155°; hips stay on the bench; wrists over elbows scored |
+| Cable triceps pushdown | Elbow angle; upper arm from vertical; torso angle change vs rest | Valid rep: lockout ≥ 148° (≥ 160° = full score); upper arm ≤ 30°; torso swing ≤ 16°; a hanging arm at setup is not counted |
 
 Reps use a two-state machine (up/down) with hysteresis and angle smoothing, so jitter does not double-count.
 

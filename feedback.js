@@ -2,13 +2,15 @@
 
 export const SURVEY_VERSION = 1;
 
+const REPS = ['squat', 'pushup', 'curl', 'bench', 'pushdown'];
+
 // Questions shown after a set. `show` limits a question to some exercises.
 export const QUESTIONS = [
   { id: 'tester', label: 'Your name or initials', type: 'text', required: true, remember: true },
-  { id: 'realReps', label: 'Real rep count (counted by a person or from video)', type: 'number', required: true, show: ['squat', 'pushup'] },
-  { id: 'badDone', label: 'Bad reps you did on purpose', type: 'number', required: true, show: ['squat', 'pushup'] },
-  { id: 'badCaught', label: 'How many of those did the app flag?', type: 'number', required: true, show: ['squat', 'pushup'] },
-  { id: 'goodFlagged', label: 'Did it flag any good reps as bad?', type: 'choice', options: ['None', '1–2', '3 or more'], required: true, show: ['squat', 'pushup'] },
+  { id: 'realReps', label: 'Real rep count (counted by a person or from video)', type: 'number', required: true, show: REPS },
+  { id: 'badDone', label: 'Bad reps you did on purpose', type: 'number', required: true, show: REPS },
+  { id: 'badCaught', label: 'How many of those did the app flag?', type: 'number', required: true, show: REPS },
+  { id: 'goodFlagged', label: 'Did it flag any good reps as bad?', type: 'choice', options: ['None', '1–2', '3 or more'], required: true, show: REPS },
   { id: 'realHold', label: 'Real hold time in seconds (from a stopwatch)', type: 'number', required: true, show: ['plank'] },
   { id: 'pauseWorked', label: 'When you dropped or raised your hips on purpose, did the timer pause?', type: 'choice', options: ['Yes, every time', 'Sometimes', 'No', 'Did not test'], required: true, show: ['plank'] },
   { id: 'tracking', label: 'Did the skeleton stay on your body?', type: 'choice', options: ['Always', 'Mostly', 'Often lost me'], required: true },
@@ -23,7 +25,7 @@ export function questionsFor(exercise) {
   return QUESTIONS.filter((q) => !q.show || q.show.includes(exercise));
 }
 
-const NAMES = { squat: 'Squat', pushup: 'Push-up', plank: 'Plank' };
+const NAMES = { squat: 'Squat', pushup: 'Push-up', plank: 'Plank', curl: 'Dumbbell curl', bench: 'Bench press', pushdown: 'Cable triceps pushdown' };
 const secs = (ms) => Math.round(ms / 1000);
 
 /** Count accuracy as a percentage (100 = exact). */
