@@ -9,6 +9,7 @@ Pose estimation runs fully on the device (MediaPipe Pose Landmarker "lite", WebA
 | `index.html` | UI: exercise picker, live camera view with skeleton overlay, cues, voice, set summary |
 | `engine.js` | Form rules, rep counting, scoring (pure logic, no DOM) |
 | `vendor/` | MediaPipe library, WASM runtime and pose model (bundled, ~15 MB, no CDN at runtime) |
+| `feedback.js` | Tester survey: questions, validation, fixed-format report |
 | `tests/engine.test.mjs` | 8 logic tests with synthetic skeletons (`node --test tests/engine.test.mjs`) |
 
 ## Run
@@ -23,6 +24,9 @@ Live (GitHub Pages): https://abdallahelgazzaar-hue.github.io/form-coach/ . Camer
 | Plank | Shoulder-hip-ankle line | ≥ 165° good, 155–165° warn, < 155° pauses the hold timer |
 
 Reps use a two-state machine (up/down) with hysteresis and angle smoothing, so jitter does not double-count.
+
+## Tester feedback
+After each set, testers tap **Send tester feedback** on the summary screen (or **Tester? Send feedback** on the start screen). The app fills in its own counts; the tester adds the real count, deliberate bad reps, setup and ratings. **Send** opens the phone's share sheet (WhatsApp, email) with a fixed-format report including count accuracy and bad-rep detection %. Name, phone position and distance are remembered on the device.
 
 ## Known limits
 - Side view only, one person in frame. Front-view faults (knee valgus, uneven hips) are not checked yet.
