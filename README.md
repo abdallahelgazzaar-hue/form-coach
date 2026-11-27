@@ -9,6 +9,7 @@ Pose estimation runs fully on the device (MediaPipe Pose Landmarker "lite", WebA
 | `index.html` | UI: exercise picker, live camera view with skeleton overlay, cues, voice, set summary |
 | `engine.js` | Form rules, rep counting, scoring (pure logic, no DOM) |
 | `vendor/` | MediaPipe library, WASM runtime and pose model (bundled, ~15 MB, no CDN at runtime) |
+| `demo.js` | Animated correct-form demos (SVG figure, male or female) for all six exercises |
 | `feedback.js` | Tester survey: questions, validation, fixed-format report |
 | `nutrition.js` | Body assessment, health screening, calorie/protein targets, meal ideas (pure logic, no DOM; `assess(profile)` is the entry point later phases call) |
 | `foods.js` | 73 common foods with kcal, protein, carbs, fat per 100 g (USDA FoodData Central, Australian Food Composition Database, rounded), name/alias lookup |
