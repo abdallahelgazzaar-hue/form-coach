@@ -122,6 +122,21 @@
   .meal .metric b { font-size: 15px; } .meal .metric span { color: var(--muted); font-size: 13px; }
   .note { color: var(--warn) !important; }
   .refer li { color: var(--text); }
+  details.more summary, details.check summary { cursor: pointer; color: var(--accent); font-size: 14px; padding: 6px 0; }
+  details.check { background: var(--panel-2); border-radius: 12px; padding: 4px 12px 10px; margin-top: 8px; }
+  details.check[open] summary { color: var(--text); font-weight: 600; }
+  .frow { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .fmain { display: flex; gap: 6px; align-items: center; }
+  .frow input { font: inherit; font-size: 15px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; min-width: 0; }
+  .fname { flex: 1 1 auto; } .fgrams { width: 76px; flex: none; } .fk, .fp { flex: 1; }
+  .unit { color: var(--muted); font-size: 13px; }
+  .fdel { width: 34px; height: 38px; border-radius: 10px; background: #ffffff14; font-size: 20px; flex: none; }
+  .addrow { margin-top: 8px; padding: 9px 12px; border-radius: 10px; background: #4ea1ff22; color: var(--accent); font-weight: 700; font-size: 14px; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .cmp > div { background: var(--bg); border-radius: 10px; padding: 8px 10px; }
+  .cmp small { display: block; color: var(--muted); font-size: 12px; }
+  .cmp b { font-size: 18px; font-variant-numeric: tabular-nums; } .cmp span { color: var(--muted); font-size: 13px; }
+  .cmp .pill { color: #06121f; font-size: 11px; margin-left: 2px; }
 </style>
 </head>
 <body>
@@ -236,7 +251,8 @@
 <script type="module">
 import { Analyzer } from './engine.js';
 import { questionsFor, buildReport, validate } from './feedback.js';
-import { ACTIVITY, GOALS, screeningFor, validateProfile, assess, mealPlan, DISCLAIMER, buildNutritionReport, PROFILE_VERSION } from './nutrition.js';
+import { ACTIVITY, GOALS, screeningFor, validateProfile, assess, mealPlan, DISCLAIMER, buildNutritionReport, PROFILE_VERSION, checkMeal, dayTotals, resolveItem } from './nutrition.js';
+import { FOODS, PORTION_TIPS } from './foods.js';
 
 // Library, WASM runtime and model are served next to this page so nothing depends on a third-party CDN at runtime.
 const VENDOR = './vendor/';
@@ -607,9 +623,15 @@ function go(id) {
 const PROFILE_KEY = 'fc.profile';
 const loadProfile = () => { try { const o = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null'); return o?.v === PROFILE_VERSION ? o.data : null; } catch { return null; } };
 const saveProfile = (data) => { try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ v: PROFILE_VERSION, saved: new Date().toISOString(), data })); } catch { /* private mode */ } };
-const forgetProfile = () => { try { localStorage.removeItem(PROFILE_KEY); } catch { /* ignore */ } };
+const forgetProfile = () => { try { localStorage.removeItem(PROFILE_KEY); localStorage.removeItem(DIET_KEY); } catch { /* ignore */ } };
+// What the user currently eats, per meal. Saved only when "Remember my details" is ticked.
+const DIET_KEY = 'fc.diet';
+const loadDiet = () => { try { const o = JSON.parse(localStorage.getItem(DIET_KEY) || 'null'); return o?.v === 1 ? o.meals : {}; } catch { return {}; } };
+const saveDiet = () => { if (nu.p?.remember === false) return; try { localStorage.setItem(DIET_KEY, JSON.stringify({ v: 1, meals: nu.diet })); } catch { /* private mode */ } };
 
-const nu = { p: null, result: null, vegetarian: false };
+const nu = { p: null, result: null, vegetarian: false, diet: loadDiet(), openChecks: new Set() };
+// One shared autocomplete list of built-in foods.
+{ const dl = document.createElement('datalist'); dl.id = 'foodList'; for (const f of FOODS) { const o = document.createElement('option'); o.value = f.name; dl.append(o); } document.body.append(dl); }
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 $('nuDisc1').textContent = DISCLAIMER;
@@ -619,7 +641,7 @@ $('nrEdit').addEventListener('click', () => { show('nutrition'); window.scrollTo
 $('nrShare').addEventListener('click', shareNutrition);
 $('nrForget').addEventListener('click', () => {
   forgetProfile();
-  nu.p = { remember: true, screen: {} }; nu.result = null;
+  nu.p = { remember: true, screen: {} }; nu.result = null; nu.diet = {};
   renderNutritionForm(); show('nutrition'); window.scrollTo(0, 0);
   $('nuErr').textContent = 'Your saved details were deleted from this phone.';
 });
@@ -753,20 +775,100 @@ function renderNutritionResult() {
       <p>Also aim for ${m.fibre} g fibre and about ${m.waterL} L of fluids a day, more when you train or it is hot.${m.proteinBasis === 'reference' ? ` Protein is based on ${m.refWeightKg} kg, the top of the healthy weight range for your height, because using total weight would overstate it.` : ''}</p>
     </div>
     <div class="card">
-      <h3>Sample meal ideas</h3>
-      <p>Ideas to show what the targets look like, not a set diet. Swap foods to suit your taste, culture and budget.</p>
+      <h3>Meal ideas and diet check</h3>
+      <p><b style="color:var(--text)">Each meal lists alternatives, not a menu to eat in full.</b> Pick one option, or combine two smaller ones, to reach roughly that meal's protein. Swap foods to suit your taste, culture and budget.</p>
+      <p>Already have a routine? Tap <b style="color:var(--text)">Check what I eat</b> under a meal, add your usual foods and weights, and see how it compares.</p>
       <div class="opts" style="margin:10px 0 4px" role="group" aria-label="Food preference">
         <button type="button" class="opt" data-veg="0" aria-pressed="${!nu.vegetarian}">All foods</button>
         <button type="button" class="opt" data-veg="1" aria-pressed="${nu.vegetarian}">Vegetarian</button>
       </div>
-      ${plan.map((x) => `<div class="meal"><div class="metric"><b>${x.label}</b><span>~${x.kcal} kcal · ~${x.protein} g protein</span></div>
-        <ul>${x.ideas.slice(0, 3).map((i) => `<li>${esc(i.text)} <span class="hint">(~${i.protein} g protein)</span></li>`).join('')}</ul></div>`).join('')}
+      ${plan.map((x) => `<div class="meal" data-meal="${x.id}"><div class="metric"><b>${x.label}</b><span>target ~${x.kcal} kcal · ~${x.protein} g protein</span></div>
+        <ul>${x.ideas.slice(0, 4).map((i) => `<li>${esc(i.text)} <span class="hint">(~${i.protein} g protein)</span></li>`).join('')}</ul>
+        ${x.ideas.length > 4 ? `<details class="more"><summary>${x.ideas.length - 4} more ${x.label.toLowerCase()} ideas</summary><ul>${x.ideas.slice(4).map((i) => `<li>${esc(i.text)} <span class="hint">(~${i.protein} g protein)</span></li>`).join('')}</ul></details>` : ''}
+        <details class="check" data-check="${x.id}"${nu.openChecks.has(x.id) ? ' open' : ''}><summary>Check what I eat for ${x.label.toLowerCase()}</summary>
+          <div class="rows"></div>
+          <button type="button" class="addrow">+ Add food</button>
+          <div class="checkout" aria-live="polite"></div>
+        </details></div>`).join('')}
+      <p class="hint" style="margin-top:12px">Portion guide: ${esc(PORTION_TIPS)}</p>
     </div>
+    <div class="card" id="dayCard" hidden></div>
     <div class="card">
       <h3>How these numbers are worked out</h3>
       <p>Resting energy uses the Mifflin-St Jeor equation (${e.bmr} kcal), multiplied by your activity level. Fat loss uses a deficit of up to 500 kcal, never below a safe minimum. Muscle gain uses a small surplus of up to 400 kcal. Protein per kg follows sports nutrition guidance for people who train.</p>
     </div>`;
   for (const b2 of out.querySelectorAll('[data-veg]')) b2.addEventListener('click', () => { nu.vegetarian = b2.dataset.veg === '1'; renderNutritionResult(); });
+  for (const m of plan) setupCheck(m);
+  updateDayCard(plan);
+}
+
+// ----- Check what I eat -----
+function setupCheck(meal) {
+  const box = document.querySelector(`[data-check="${meal.id}"]`);
+  const rows = box.querySelector('.rows');
+  box.addEventListener('toggle', () => { if (box.open) nu.openChecks.add(meal.id); else nu.openChecks.delete(meal.id); });
+  const items = (nu.diet[meal.id] ||= []);
+  const refresh = () => { renderCheckResult(meal, box); updateDayCard(); saveDiet(); };
+  const addRow = (item, focus) => {
+    const row = document.createElement('div'); row.className = 'frow';
+    row.innerHTML = `<div class="fmain"><input class="fname" list="foodList" placeholder="Food, e.g. rice" autocomplete="off" aria-label="Food">
+      <input class="fgrams" type="number" inputmode="decimal" min="1" placeholder="g" aria-label="Weight in grams"><span class="unit">g</span>
+      <button type="button" class="fdel" aria-label="Remove">×</button></div>
+      <div class="fmatch hint" hidden></div>
+      <div class="fcustom" hidden><span class="hint">Not in our list. Pick a close match, or enter values per 100 g from the pack label:</span>
+      <div class="fmain"><input class="fk" type="number" inputmode="decimal" placeholder="kcal" aria-label="Calories per 100 g"><span class="unit">kcal</span>
+      <input class="fp" type="number" inputmode="decimal" placeholder="protein" aria-label="Protein grams per 100 g"><span class="unit">g protein</span></div></div>`;
+    const [name, grams] = [row.querySelector('.fname'), row.querySelector('.fgrams')];
+    const [k, p] = [row.querySelector('.fk'), row.querySelector('.fp')];
+    name.value = item.name ?? ''; grams.value = item.grams ?? ''; k.value = item.kcal100 ?? ''; p.value = item.protein100 ?? '';
+    const sync = () => {
+      Object.assign(item, { name: name.value, grams: grams.value, kcal100: k.value, protein100: p.value });
+      const r = resolveItem({ ...item, grams: item.grams || 1 });
+      row.querySelector('.fcustom').hidden = !(name.value.trim() && (r.ok ? r.custom : r.reason === 'unknown'));
+      // Show which built-in food was matched, so "rice" visibly means white rice, cooked.
+      const m = row.querySelector('.fmatch');
+      m.hidden = !(r.ok && !r.custom);
+      if (!m.hidden) m.textContent = Number(item.grams) > 0
+        ? `✓ ${r.name}: ${Math.round(r.kcal)} kcal, ${Math.round(r.protein)} g protein`
+        : `✓ ${r.name}. Now add the weight.`;
+      refresh();
+    };
+    for (const el of [name, grams, k, p]) el.addEventListener('input', sync);
+    row.querySelector('.fdel').addEventListener('click', () => { items.splice(items.indexOf(item), 1); row.remove(); refresh(); });
+    rows.append(row);
+    sync();
+    if (focus) name.focus();
+  };
+  for (const it of items) addRow(it);
+  if (!items.length) { const it = {}; items.push(it); addRow(it); }
+  box.querySelector('.addrow').addEventListener('click', () => { const it = {}; items.push(it); addRow(it, true); });
+}
+
+function renderCheckResult(meal, box) {
+  const out = box.querySelector('.checkout');
+  const c = checkMeal(nu.diet[meal.id] || [], meal, { vegetarian: nu.vegetarian });
+  if (c.empty) { out.innerHTML = '<p class="hint">Add a food and its weight to see how this meal compares.</p>'; return; }
+  const skipped = c.resolved.filter((r) => !r.ok && r.reason !== 'empty').length;
+  const lvl = (st) => (st === 'ok' ? 'good' : 'warn');
+  out.innerHTML = `<div class="cmp">
+      <div><small>Calories</small><b>${c.kcal}</b><span> / ${meal.kcal}</span> <span class="pill" data-l="${lvl(c.kcalStatus)}">${c.kcalStatus === 'ok' ? 'on target' : c.kcalStatus}</span></div>
+      <div><small>Protein</small><b>${c.protein} g</b><span> / ${meal.protein} g</span> <span class="pill" data-l="${lvl(c.proteinStatus)}">${c.proteinStatus === 'ok' ? 'on target' : 'low'}</span></div>
+    </div>
+    <p>${c.good ? '<b style="color:var(--good)">This meal works.</b> ' : ''}${c.messages.map(esc).join(' ')}</p>
+    ${c.suggestions.length ? `<p>To close the protein gap, add one of: ${c.suggestions.map((x) => `${x.grams} g ${esc(x.name.replace(/ \(.*\)/, '').toLowerCase())} (+${x.protein} g, ${x.kcal} kcal)`).join('; ')}.</p>` : ''}
+    ${skipped ? `<p class="note">${skipped} item${skipped > 1 ? 's are' : ' is'} not counted yet: add a weight, or label values for foods not in our list.</p>` : ''}`;
+}
+
+function updateDayCard(plan = mealPlan(nu.result, { vegetarian: nu.vegetarian })) {
+  const card = $('dayCard'); if (!card || nu.result?.status !== 'ok') return;
+  const t = dayTotals(nu.diet), e = nu.result.energy, m = nu.result.macros;
+  card.hidden = t.mealsEntered === 0;
+  if (card.hidden) return;
+  const planned = plan.filter((x) => (nu.diet[x.id] || []).some((i) => resolveItem(i).ok));
+  const tk = planned.reduce((a, x) => a + x.kcal, 0), tp = planned.reduce((a, x) => a + x.protein, 0);
+  card.innerHTML = `<h3>Your day so far</h3>
+    <div class="cmp"><div><small>Calories</small><b>${t.kcal}</b><span> / ${e.target}</span></div><div><small>Protein</small><b>${t.protein} g</b><span> / ${m.protein} g</span></div></div>
+    <p>${t.mealsEntered} of 4 meals entered. For those meals the targets add up to ${tk} kcal and ${tp} g protein. Small differences between meals are fine; what matters is the daily total over a week.</p>`;
 }
 
 async function shareNutrition() {

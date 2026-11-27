@@ -4,6 +4,8 @@
 // Sources for every number are listed in README.md ("Nutrition module: formulas and sources").
 // These are general population targets for healthy adults, not medical or dietetic advice.
 
+import { findFood, FOODS } from './foods.js';
+
 export const PROFILE_VERSION = 1;
 
 export const ACTIVITY = {
@@ -207,30 +209,56 @@ export const MEAL_SPLIT = [
 ];
 
 // protein = rough grams for the portion described. veg = suitable for vegetarians.
+// Each meal's ideas are ALTERNATIVES: the user picks one, or combines smaller ones, to reach that meal's protein.
 export const MEAL_IDEAS = {
   breakfast: [
     { text: 'Greek yoghurt (200 g) with berries, oats and a few nuts', protein: 25, veg: true },
     { text: '3 eggs scrambled on wholegrain toast with spinach and tomato', protein: 25, veg: true },
     { text: 'Overnight oats made with milk and a scoop of protein powder', protein: 30, veg: true },
     { text: 'Ful medames (fava beans) with an egg, wholemeal pita and salad', protein: 22, veg: true },
+    { text: 'Omelette (2 eggs + 3 egg whites) with feta and vegetables', protein: 28, veg: true },
+    { text: 'Cottage cheese (150 g) on wholegrain toast with tomato', protein: 22, veg: true },
+    { text: 'Smoked salmon (60 g) and egg on a wholemeal bagel', protein: 25, veg: false },
+    { text: 'Wheat biscuit cereal (3 biscuits) with 300 ml milk and a banana', protein: 16, veg: true },
+    { text: 'Skyr (170 g) with granola and fruit', protein: 20, veg: true },
+    { text: 'Tofu scramble with vegetables on toast', protein: 20, veg: true },
   ],
   lunch: [
     { text: 'Grilled chicken breast (150 g), brown rice and a large salad', protein: 45, veg: false },
     { text: 'Tuna or salmon wholegrain wrap with mixed vegetables', protein: 35, veg: false },
     { text: 'Lentil and vegetable soup with wholegrain bread and cottage cheese', protein: 30, veg: true },
     { text: 'Chickpea, quinoa and feta bowl with roasted vegetables', protein: 25, veg: true },
+    { text: 'Chicken shawarma plate: grilled chicken, salad, hummus, half a pita', protein: 40, veg: false },
+    { text: 'Lean beef kofta (150 g) with tabbouleh and yoghurt sauce', protein: 38, veg: false },
+    { text: 'Egg and salad sandwich on wholegrain bread with a glass of milk', protein: 25, veg: true },
+    { text: 'Prawn and vegetable stir-fry with rice', protein: 30, veg: false },
+    { text: 'Falafel (4 pieces) in pita with salad and tahini, plus Greek yoghurt', protein: 25, veg: true },
+    { text: 'Leftover dinner portion (see dinner ideas)', protein: 35, veg: true },
   ],
   dinner: [
     { text: 'Baked salmon (150 g), potatoes and steamed greens', protein: 35, veg: false },
     { text: 'Lean beef or lamb stir-fry with vegetables and noodles', protein: 40, veg: false },
     { text: 'Tofu or tempeh curry with vegetables and rice', protein: 25, veg: true },
     { text: 'Turkey or chicken mince chilli with beans and rice', protein: 40, veg: false },
+    { text: 'Grilled white fish (200 g), couscous and salad', protein: 45, veg: false },
+    { text: 'Chicken thigh tray bake with sweet potato and vegetables', protein: 38, veg: false },
+    { text: 'Lentil and chickpea stew with brown rice and yoghurt', protein: 25, veg: true },
+    { text: 'Wholemeal pasta with lean mince bolognese and a side salad', protein: 38, veg: false },
+    { text: 'Halloumi and roasted vegetable bowl with quinoa', protein: 28, veg: true },
+    { text: 'Egg and vegetable frittata (3 eggs) with potatoes', protein: 24, veg: true },
+    { text: 'Bean and vegetable chilli with rice, Greek yoghurt and grated cheese', protein: 24, veg: true },
   ],
   snack: [
     { text: 'Fruit and a handful of nuts', protein: 6, veg: true },
     { text: 'Cottage cheese or skyr with fruit', protein: 20, veg: true },
     { text: 'Hummus with vegetable sticks', protein: 8, veg: true },
     { text: 'Milk or a protein shake', protein: 25, veg: true },
+    { text: '2 boiled eggs', protein: 13, veg: true },
+    { text: 'Greek yoghurt (170 g) with honey', protein: 17, veg: true },
+    { text: 'Tuna (95 g can) on rice crackers', protein: 22, veg: false },
+    { text: 'Roasted chickpeas (40 g)', protein: 7, veg: true },
+    { text: 'Peanut butter on wholegrain toast', protein: 10, veg: true },
+    { text: 'Protein bar', protein: 18, veg: true },
   ],
 };
 
@@ -271,4 +299,75 @@ export function buildNutritionReport(result, input, meta = {}) {
   for (const n of result.notes) L.push('Note: ' + n);
   L.push('', DISCLAIMER);
   return L.join('\n');
+}
+
+// ----- Check your diet: compare what a user eats now with a meal's targets -----
+
+/**
+ * Resolve one entered item. item = {name, grams, kcal100?, protein100?} where the per-100 g values are only
+ * needed for foods not in the built-in list (taken from the pack label).
+ * Returns {ok, food, grams, kcal, protein, custom} or {ok: false, reason}.
+ */
+export function resolveItem(item) {
+  const grams = Number(item.grams);
+  if (!item.name || !String(item.name).trim()) return { ok: false, reason: 'empty' };
+  if (!Number.isFinite(grams) || grams <= 0 || grams > 3000) return { ok: false, reason: 'grams' };
+  const food = findFood(item.name);
+  if (food) return { ok: true, custom: false, name: food.name, grams, kcal: food.kcal * grams / 100, protein: food.protein * grams / 100 };
+  const k = Number(item.kcal100), pr = Number(item.protein100);
+  if (item.kcal100 === '' || item.kcal100 == null || !Number.isFinite(k) || k < 0 || k > 900 || !Number.isFinite(pr) || pr < 0 || pr > 100 || item.protein100 === '' || item.protein100 == null) {
+    return { ok: false, reason: 'unknown' };
+  }
+  return { ok: true, custom: true, name: String(item.name).trim(), grams, kcal: k * grams / 100, protein: pr * grams / 100 };
+}
+
+/** Ready-to-add protein sources for suggestions, grouped so users see a mix (one per group). */
+const BOOSTERS = [
+  { group: 'meat', names: ['Chicken breast, cooked', 'Tuna, canned in water, drained', 'White fish, cooked'] },
+  { group: 'dairy', names: ['Greek yoghurt, plain, low-fat', 'Cottage cheese', 'Egg, whole (1 large = 50 g)'] },
+  { group: 'plant', names: ['Tofu, firm', 'Lentils, cooked'] },
+  { group: 'supplement', names: ['Whey protein powder (1 scoop = 30 g)'] },
+];
+
+/**
+ * Compare entered items with a meal target {kcal, protein}.
+ * Status per measure: 'low' (< 80%), 'ok' (80 to 120%), 'high' (> 120%). Protein is never 'high': more is fine up to the daily range.
+ */
+export function checkMeal(items, target, { vegetarian = false } = {}) {
+  const resolved = items.map(resolveItem);
+  const valid = resolved.filter((r) => r.ok);
+  const kcal = Math.round(valid.reduce((a, r) => a + r.kcal, 0));
+  const protein = Math.round(valid.reduce((a, r) => a + r.protein, 0));
+  if (!valid.length) return { resolved, kcal: 0, protein: 0, empty: true };
+  const kRatio = kcal / target.kcal, pRatio = protein / target.protein;
+  const kcalStatus = kRatio < 0.8 ? 'low' : kRatio > 1.2 ? 'high' : 'ok';
+  const proteinStatus = pRatio < 0.8 ? 'low' : 'ok';
+  const messages = [];
+  let suggestions = [];
+  if (proteinStatus === 'low') {
+    const gap = target.protein - protein;
+    messages.push(`About ${gap} g protein short of this meal's target.`);
+    const order = vegetarian ? ['dairy', 'plant', 'supplement'] : ['meat', 'dairy', 'plant'];
+    suggestions = order.map((g) => BOOSTERS.find((x) => x.group === g).names
+      .map((n) => FOODS.find((f) => f.name === n))
+      .map((f) => { const grams = Math.ceil((gap / f.protein) * 100 / 5) * 5; return { name: f.name, grams, protein: Math.round(f.protein * grams / 100), kcal: Math.round(f.kcal * grams / 100) }; })
+      .sort((a, b) => a.kcal - b.kcal)[0]);
+  } else messages.push('Protein is on target.');
+  if (kcalStatus === 'high') messages.push(`About ${kcal - target.kcal} kcal over. A smaller portion of rice, bread, oil or sweets is the easiest cut.`);
+  else if (kcalStatus === 'low') messages.push(`About ${target.kcal - kcal} kcal under. Fine if another meal is bigger; otherwise add some carbs or healthy fats.`);
+  else messages.push('Calories are on target.');
+  return { resolved, kcal, protein, kcalStatus, proteinStatus, messages, suggestions, good: kcalStatus === 'ok' && proteinStatus === 'ok' };
+}
+
+/** Totals across all meals with at least one valid item. meals = {mealId: items[]}. */
+export function dayTotals(meals) {
+  let kcal = 0, protein = 0, mealsEntered = 0;
+  for (const items of Object.values(meals || {})) {
+    const valid = (items || []).map(resolveItem).filter((r) => r.ok);
+    if (!valid.length) continue;
+    mealsEntered++;
+    kcal += valid.reduce((a, r) => a + r.kcal, 0);
+    protein += valid.reduce((a, r) => a + r.protein, 0);
+  }
+  return { kcal: Math.round(kcal), protein: Math.round(protein), mealsEntered };
 }
