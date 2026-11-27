@@ -1,1 +1,1 @@
-{ "name": "form-coach", "private": true, "type": "module", "scripts": { "test": "node --test tests/engine.test.mjs tests/feedback.test.mjs" } }
+{ "name": "form-coach", "private": true, "type": "module", "scripts": { "test": "node --test tests/engine.test.mjs tests/feedback.test.mjs tests/nutrition.test.mjs" } }

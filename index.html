@@ -94,11 +94,43 @@
   #fbErr { color: var(--bad); font-size: 14px; margin: 0; min-height: 1.2em; }
   #fbPreview { white-space: pre-wrap; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospace; background: var(--panel); border-radius: 14px; padding: 14px; color: var(--muted); margin: 0; }
   .linkbtn { background: none; color: var(--accent); font-size: 14px; padding: 6px; }
+  /* Top switch between modules */
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--panel); border-radius: 12px; padding: 4px; }
+  .seg button { padding: 10px 8px; border-radius: 9px; background: none; font-size: 14.5px; font-weight: 600; color: var(--muted); }
+  .seg button[aria-current="page"] { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+  /* Body & nutrition */
+  #nutrition, #nutriResult { padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; gap: 14px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hint { font-size: 12.5px; color: var(--muted); font-weight: 400; }
+  .opts.stack { flex-direction: column; }
+  .opts.stack .opt { text-align: left; }
+  .opt small { display: block; font-weight: 400; opacity: .8; font-size: 12.5px; }
+  .yn { display: flex; gap: 6px; }
+  .yn .opt { min-width: 64px; text-align: center; }
+  .disclaimer { font-size: 12.5px; line-height: 1.5; color: var(--muted); background: var(--panel); border-left: 4px solid var(--warn); border-radius: 10px; padding: 10px 12px; margin: 0; }
+  .metric { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .metric strong { font-size: 28px; font-variant-numeric: tabular-nums; }
+  .pill { font-size: 12.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; color: #06121f; background: var(--good); white-space: nowrap; }
+  .pill[data-l="warn"] { background: var(--warn); } .pill[data-l="bad"] { background: var(--bad); }
+  .card p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .macros { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .macros div { background: var(--panel-2); border-radius: 10px; padding: 10px; }
+  .macros small { color: var(--muted); font-size: 12px; display: block; }
+  .macros b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .meal { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .meal:first-of-type { border-top: 0; margin-top: 4px; padding-top: 0; }
+  .meal .metric b { font-size: 15px; } .meal .metric span { color: var(--muted); font-size: 13px; }
+  .note { color: var(--warn) !important; }
+  .refer li { color: var(--text); }
 </style>
 </head>
 <body>
 
 <section id="start" class="screen active">
+  <nav class="seg" aria-label="Sections">
+    <button data-go="start" aria-current="page">Form check</button>
+    <button data-go="nutrition">Body &amp; diet</button>
+  </nav>
   <div>
     <h1>Form Coach</h1>
     <p class="sub">Real-time exercise form checks using your phone camera.</p>
@@ -175,9 +207,36 @@
   <pre id="fbPreview" hidden></pre>
 </section>
 
+<section id="nutrition" class="screen">
+  <nav class="seg" aria-label="Sections">
+    <button data-go="start">Form check</button>
+    <button data-go="nutrition" aria-current="page">Body &amp; diet</button>
+  </nav>
+  <div>
+    <h1>Body &amp; diet targets</h1>
+    <p class="sub">Your BMI, waist-to-height ratio and daily calorie and protein targets. Takes about 2 minutes.</p>
+  </div>
+  <div id="nuForm" style="display:flex;flex-direction:column;gap:10px"></div>
+  <p class="disclaimer" id="nuDisc1"></p>
+  <p id="nuErr" role="alert" style="color:var(--bad);font-size:14px;margin:0;min-height:1.2em"></p>
+  <button class="primary" id="nuCalc">See my targets</button>
+  <p class="privacy">Your answers stay on this phone. Nothing is sent to a server.</p>
+</section>
+
+<section id="nutriResult" class="screen">
+  <h1 id="nrTitle">Your targets</h1>
+  <p class="disclaimer" id="nuDisc2"></p>
+  <div id="nrBody" style="display:flex;flex-direction:column;gap:12px"></div>
+  <button class="primary" id="nrShare">Share my results</button>
+  <p id="nrMsg" style="font-size:14px;color:var(--muted);margin:0" hidden></p>
+  <button class="toggle" id="nrEdit">Edit my details</button>
+  <button class="linkbtn" id="nrForget">Delete my saved details from this phone</button>
+</section>
+
 <script type="module">
 import { Analyzer } from './engine.js';
 import { questionsFor, buildReport, validate } from './feedback.js';
+import { ACTIVITY, GOALS, screeningFor, validateProfile, assess, mealPlan, DISCLAIMER, buildNutritionReport, PROFILE_VERSION } from './nutrition.js';
 
 // Library, WASM runtime and model are served next to this page so nothing depends on a third-party CDN at runtime.
 const VENDOR = './vendor/';
@@ -535,8 +594,194 @@ async function sendFeedback() {
   catch { $('fbErr').textContent = 'Copy the text below and send it by WhatsApp or email.'; }
 }
 
+// ----- Navigation between modules -----
+for (const b of document.querySelectorAll('[data-go]')) b.addEventListener('click', () => go(b.dataset.go));
+function go(id) {
+  if (id === 'nutrition') { openNutrition(); history.replaceState(null, '', '#nutrition'); }
+  else { show(id); history.replaceState(null, '', location.pathname + location.search); }
+  window.scrollTo(0, 0);
+}
+
+// ----- Body & diet -----
+// Profile is kept only in this browser's storage. Key is versioned so later phases can migrate it.
+const PROFILE_KEY = 'fc.profile';
+const loadProfile = () => { try { const o = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null'); return o?.v === PROFILE_VERSION ? o.data : null; } catch { return null; } };
+const saveProfile = (data) => { try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ v: PROFILE_VERSION, saved: new Date().toISOString(), data })); } catch { /* private mode */ } };
+const forgetProfile = () => { try { localStorage.removeItem(PROFILE_KEY); } catch { /* ignore */ } };
+
+const nu = { p: null, result: null, vegetarian: false };
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+$('nuDisc1').textContent = DISCLAIMER;
+$('nuDisc2').textContent = DISCLAIMER;
+$('nuCalc').addEventListener('click', calcNutrition);
+$('nrEdit').addEventListener('click', () => { show('nutrition'); window.scrollTo(0, 0); });
+$('nrShare').addEventListener('click', shareNutrition);
+$('nrForget').addEventListener('click', () => {
+  forgetProfile();
+  nu.p = { remember: true, screen: {} }; nu.result = null;
+  renderNutritionForm(); show('nutrition'); window.scrollTo(0, 0);
+  $('nuErr').textContent = 'Your saved details were deleted from this phone.';
+});
+
+function openNutrition() {
+  if (!nu.p) nu.p = loadProfile() ?? { remember: true, screen: {} };
+  $('nuErr').textContent = '';
+  renderNutritionForm();
+  show('nutrition');
+}
+
+function renderNutritionForm() {
+  const p = nu.p, form = $('nuForm');
+  form.innerHTML = '';
+  form.append(pick({ id: 'sex', label: 'Sex', hint: 'Used in the calorie formula, which differs for male and female bodies.' },
+    [['female', 'Female'], ['male', 'Male']], p.sex, (v) => { p.sex = v; renderNutritionForm(); }));
+  const g = document.createElement('div'); g.className = 'grid2';
+  g.append(numQ('age', 'Age', 'years'), numQ('height', 'Height', 'cm'), numQ('weight', 'Weight', 'kg'), numQ('waist', 'Waist (optional)', 'cm'));
+  form.append(g);
+  const tip = document.createElement('p'); tip.className = 'sub'; tip.style.fontSize = '13px';
+  tip.textContent = 'Waist: measure midway between your lowest rib and the top of your hip bone, after breathing out normally.';
+  form.append(tip);
+  form.append(pick({ id: 'activity', label: 'Activity level', stack: true },
+    Object.entries(ACTIVITY).map(([k, a]) => [k, a.label, a.hint]), p.activity, (v) => { p.activity = v; }));
+  form.append(pick({ id: 'goal', label: 'Goal' }, Object.entries(GOALS).map(([k, x]) => [k, x.label]), p.goal, (v) => { p.goal = v; }));
+
+  const h = document.createElement('div'); h.className = 'q'; h.dataset.q = 'screen';
+  h.innerHTML = '<div class="ql">Health check <span class="hint">· answering yes means we point you to a professional instead of giving numbers</span></div>';
+  if (!p.sex) h.insertAdjacentHTML('beforeend', '<span class="hint">Choose your sex first.</span>');
+  for (const q of p.sex ? screeningFor(p.sex) : []) {
+    const row = document.createElement('div'); row.style.display = 'flex'; row.style.flexDirection = 'column'; row.style.gap = '6px';
+    row.dataset.q = 'screen.' + q.id;
+    const t = document.createElement('div'); t.style.fontSize = '14px'; t.textContent = q.label;
+    const yn = document.createElement('div'); yn.className = 'yn';
+    for (const [val, lab] of [[false, 'No'], [true, 'Yes']]) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'opt'; b.textContent = lab;
+      b.setAttribute('aria-pressed', String(p.screen[q.id] === val));
+      b.addEventListener('click', () => { p.screen[q.id] = val; for (const x of yn.children) x.setAttribute('aria-pressed', String(x === b)); h.classList.remove('missing'); });
+      yn.append(b);
+    }
+    row.append(t, yn); h.append(row);
+  }
+  form.append(h);
+
+  const rem = document.createElement('label'); rem.className = 'q'; rem.style.flexDirection = 'row'; rem.style.alignItems = 'center';
+  rem.innerHTML = '<input type="checkbox" style="width:auto"> <span style="font-size:14px">Remember my details on this phone</span>';
+  rem.firstChild.checked = p.remember !== false;
+  rem.firstChild.addEventListener('change', (e) => { p.remember = e.target.checked; });
+  form.append(rem);
+
+  function numQ(id, label, unit) {
+    const box = document.createElement('div'); box.className = 'q'; box.dataset.q = id;
+    const lab = document.createElement('label'); lab.htmlFor = 'nu_' + id; lab.innerHTML = `${esc(label)} <span class="hint">${unit}</span>`;
+    const inp = document.createElement('input'); inp.id = 'nu_' + id; inp.type = 'number'; inp.inputMode = 'decimal'; inp.step = 'any';
+    if (p[id] != null) inp.value = p[id];
+    inp.addEventListener('input', () => { p[id] = inp.value; box.classList.remove('missing'); });
+    box.append(lab, inp); return box;
+  }
+}
+
+function pick(q, options, current, onPick) {
+  const box = document.createElement('div'); box.className = 'q'; box.dataset.q = q.id;
+  const lab = document.createElement('div'); lab.className = 'ql'; lab.textContent = q.label;
+  if (q.hint) { const h = document.createElement('span'); h.className = 'hint'; h.textContent = q.hint; lab.append(document.createElement('br'), h); }
+  const opts = document.createElement('div'); opts.className = 'opts' + (q.stack ? ' stack' : ''); opts.setAttribute('role', 'group');
+  for (const [val, text, sub] of options) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'opt';
+    b.innerHTML = esc(text) + (sub ? `<small>${esc(sub)}</small>` : '');
+    b.setAttribute('aria-pressed', String(val === current));
+    b.addEventListener('click', () => { for (const x of opts.children) x.setAttribute('aria-pressed', String(x === b)); box.classList.remove('missing'); onPick(val); });
+    opts.append(b);
+  }
+  box.append(lab, opts); return box;
+}
+
+function calcNutrition() {
+  const p = nu.p;
+  for (const el of document.querySelectorAll('#nuForm .missing')) el.classList.remove('missing');
+  const errs = validateProfile(p);
+  if (errs.length) {
+    for (const e of errs) document.querySelector(`#nuForm [data-q="${e.field.split('.')[0]}"]`)?.classList.add('missing');
+    const msgs = [...new Set(errs.map((e) => e.message))];
+    $('nuErr').textContent = msgs.length > 2 ? `Please complete the ${document.querySelectorAll('#nuForm .missing').length} items marked in red.` : msgs.join('. ') + '.';
+    document.querySelector('#nuForm .missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  $('nuErr').textContent = '';
+  // Drop answers to questions that no longer apply (e.g. pregnancy after switching sex).
+  const keep = new Set(screeningFor(p.sex).map((q) => q.id));
+  for (const k of Object.keys(p.screen)) if (!keep.has(k)) delete p.screen[k];
+  if (p.remember !== false) saveProfile(p); else forgetProfile();
+  nu.result = assess(p);
+  renderNutritionResult();
+  show('nutriResult'); window.scrollTo(0, 0);
+}
+
+function renderNutritionResult() {
+  const r = nu.result, out = $('nrBody');
+  $('nrMsg').textContent = ''; $('nrMsg').hidden = true;
+  $('nrShare').hidden = r.status !== 'ok';
+  if (r.status !== 'ok') {
+    $('nrTitle').textContent = 'Please talk to a professional';
+    out.innerHTML = `<div class="card refer"><h3>Why we are not showing targets</h3><ul>${r.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      <p>In Australia you can find an Accredited Practising Dietitian at dietitiansaustralia.org.au, or ask your GP for a referral. You can still use the form checker for exercise technique.</p></div>`;
+    return;
+  }
+  $('nrTitle').textContent = 'Your targets';
+  const { body: b, energy: e, macros: m } = r;
+  const pace = e.weeklyKg === 0 ? 'Weight should stay about the same.'
+    : `Expected change in the first weeks: about ${Math.abs(e.weeklyKg)} kg ${e.weeklyKg < 0 ? 'lost' : 'gained'} per week. It slows over time.`;
+  const changeTxt = e.dailyChange === 0 ? 'Equal to your maintenance' : `${Math.abs(e.dailyChange)} kcal ${e.dailyChange < 0 ? 'below' : 'above'} your maintenance of ${e.maintenance}`;
+  const plan = mealPlan(r, { vegetarian: nu.vegetarian });
+  out.innerHTML = `
+    ${r.notes.map((n) => `<div class="card"><p class="note">${esc(n)}</p></div>`).join('')}
+    <div class="card">
+      <h3>Body check</h3>
+      <div class="metric"><span>BMI <strong>${b.bmi}</strong></span><span class="pill" data-l="${b.bmiCategory.level}">${esc(b.bmiCategory.label)}</span></div>
+      <div class="metric" style="margin-top:6px"><span>Waist-to-height <strong>${b.whtr ?? '–'}</strong></span>${b.whtrCategory ? `<span class="pill" data-l="${b.whtrCategory.level}">${esc(b.whtrCategory.label)}</span>` : '<span class="hint">no waist given</span>'}</div>
+      <p>${esc(b.reading)}</p>
+      <p>Healthy BMI range for your height: ${b.healthyWeightKg[0]} to ${b.healthyWeightKg[1]} kg. A healthy waist is under half your height.</p>
+    </div>
+    <div class="card">
+      <h3>Daily targets · ${esc(GOALS[r.goalUsed].label)}</h3>
+      <div class="metric"><span>Calories</span><strong>${e.target} kcal</strong></div>
+      <p>${esc(changeTxt)}. ${esc(pace)}</p>
+      <div class="macros">
+        <div><small>Protein</small><b>${m.protein} g</b><small>${m.proteinRange[0]}–${m.proteinRange[1]} g</small></div>
+        <div><small>Fat</small><b>${m.fat} g</b><small>about 30%</small></div>
+        <div><small>Carbs</small><b>${m.carbs} g</b><small>the rest</small></div>
+      </div>
+      <p>Also aim for ${m.fibre} g fibre and about ${m.waterL} L of fluids a day, more when you train or it is hot.${m.proteinBasis === 'reference' ? ` Protein is based on ${m.refWeightKg} kg, the top of the healthy weight range for your height, because using total weight would overstate it.` : ''}</p>
+    </div>
+    <div class="card">
+      <h3>Sample meal ideas</h3>
+      <p>Ideas to show what the targets look like, not a set diet. Swap foods to suit your taste, culture and budget.</p>
+      <div class="opts" style="margin:10px 0 4px" role="group" aria-label="Food preference">
+        <button type="button" class="opt" data-veg="0" aria-pressed="${!nu.vegetarian}">All foods</button>
+        <button type="button" class="opt" data-veg="1" aria-pressed="${nu.vegetarian}">Vegetarian</button>
+      </div>
+      ${plan.map((x) => `<div class="meal"><div class="metric"><b>${x.label}</b><span>~${x.kcal} kcal · ~${x.protein} g protein</span></div>
+        <ul>${x.ideas.slice(0, 3).map((i) => `<li>${esc(i.text)} <span class="hint">(~${i.protein} g protein)</span></li>`).join('')}</ul></div>`).join('')}
+    </div>
+    <div class="card">
+      <h3>How these numbers are worked out</h3>
+      <p>Resting energy uses the Mifflin-St Jeor equation (${e.bmr} kcal), multiplied by your activity level. Fat loss uses a deficit of up to 500 kcal, never below a safe minimum. Muscle gain uses a small surplus of up to 400 kcal. Protein per kg follows sports nutrition guidance for people who train.</p>
+    </div>`;
+  for (const b2 of out.querySelectorAll('[data-veg]')) b2.addEventListener('click', () => { nu.vegetarian = b2.dataset.veg === '1'; renderNutritionResult(); });
+}
+
+async function shareNutrition() {
+  const text = buildNutritionReport(nu.result, nu.p, { date: new Date().toISOString().slice(0, 10) });
+  try { if (navigator.share) { await navigator.share({ title: 'My Form Coach targets', text }); return; } }
+  catch (e) { if (e?.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(text); $('nrMsg').textContent = 'Copied. Paste it into WhatsApp, notes or email.'; }
+  catch { $('nrMsg').textContent = 'Sharing is not available in this browser.'; }
+  $('nrMsg').hidden = false;
+}
+
+if (location.hash === '#nutrition') openNutrition();
+
 // Test hook (used by automated checks only).
-window.__formCoach = { state, render, renderSummary, openFeedback };
+window.__formCoach = { state, render, renderSummary, openFeedback, nu, openNutrition };
 </script>
 </body>
 </html>
