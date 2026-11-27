@@ -81,6 +81,19 @@
   .reps { display: flex; flex-wrap: wrap; gap: 6px; }
   #summary .toggle { flex: none; }
   .rep { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #06121f; }
+  /* Feedback survey */
+  #feedback { padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); max-width: 560px; margin: 0 auto; gap: 14px; }
+  .q { background: var(--panel); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .q label, .q .ql { font-size: 14.5px; font-weight: 600; }
+  .q input, .q textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; width: 100%; }
+  .q textarea { min-height: 80px; resize: vertical; }
+  .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .opt { padding: 9px 12px; border-radius: 10px; background: var(--panel-2); font-size: 14px; }
+  .opt[aria-pressed="true"] { background: var(--accent); color: #06121f; font-weight: 700; }
+  .q.missing { outline: 2px solid var(--bad); }
+  #fbErr { color: var(--bad); font-size: 14px; margin: 0; min-height: 1.2em; }
+  #fbPreview { white-space: pre-wrap; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospace; background: var(--panel); border-radius: 14px; padding: 14px; color: var(--muted); margin: 0; }
+  .linkbtn { background: none; color: var(--accent); font-size: 14px; padding: 6px; }
 </style>
 </head>
 <body>
@@ -115,6 +128,7 @@
 
   <button class="primary" id="startBtn">Start camera</button>
   <p id="status" role="status"></p>
+  <button class="linkbtn" id="fbStartBtn">Tester? Send feedback</button>
   <p class="privacy">Video is analysed on this device and is never uploaded or recorded.</p>
 </section>
 
@@ -144,12 +158,26 @@
   <div class="kpis" id="kpis"></div>
   <div class="card"><h3>Reps</h3><div class="reps" id="repChips"></div></div>
   <div class="card"><h3>What to work on</h3><ul id="faults"></ul></div>
-  <button class="primary" id="againBtn">Start another set</button>
+  <button class="primary" id="fbBtn">Send tester feedback</button>
+  <button class="toggle" id="againBtn">Start another set</button>
   <button class="toggle" id="homeBtn">Change exercise</button>
+</section>
+
+<section id="feedback" class="screen">
+  <div>
+    <h1>Tester feedback</h1>
+    <p class="sub" id="fbSub">About 1 minute. The app's own numbers are filled in for you.</p>
+  </div>
+  <div id="fbForm"></div>
+  <p id="fbErr" role="alert"></p>
+  <button class="primary" id="fbSend">Send feedback</button>
+  <button class="toggle" id="fbBack">Back</button>
+  <pre id="fbPreview" hidden></pre>
 </section>
 
 <script type="module">
 import { Analyzer } from './engine.js';
+import { questionsFor, buildReport, validate } from './feedback.js';
 
 // Library, WASM runtime and model are served next to this page so nothing depends on a third-party CDN at runtime.
 const VENDOR = './vendor/';
@@ -208,6 +236,10 @@ $('voiceToggle').addEventListener('click', () => {
 $('startBtn').addEventListener('click', startSession);
 $('stopBtn').addEventListener('click', finishSession);
 $('againBtn').addEventListener('click', startSession);
+$('fbBtn').addEventListener('click', () => openFeedback(state.lastSummary));
+$('fbStartBtn').addEventListener('click', () => openFeedback(null));
+$('fbBack').addEventListener('click', () => show(state.lastSummary && state.fbFrom === 'summary' ? 'summary' : 'start'));
+$('fbSend').addEventListener('click', sendFeedback);
 $('homeBtn').addEventListener('click', () => show('start'));
 $('flipBtn').addEventListener('click', async () => { setFacing(state.facing === 'user' ? 'environment' : 'user'); await openCamera(); });
 
@@ -289,7 +321,8 @@ function finishSession() {
   if (state.stream) for (const t of state.stream.getTracks()) t.stop();
   state.stream = null;
   speechSynthesis?.cancel?.();
-  renderSummary(state.analyzer.summary());
+  state.lastSummary = state.analyzer.summary();
+  renderSummary(state.lastSummary);
   show('summary');
 }
 
@@ -412,8 +445,98 @@ function renderSummary(s) {
   $('faults').innerHTML = (f.length ? f : ['No recurring faults detected.']).map((x) => `<li>${x}</li>`).join('');
 }
 
+// ----- Tester feedback -----
+const remembered = () => { try { return JSON.parse(localStorage.getItem('fc.tester') || '{}'); } catch { return {}; } };
+const remember = (o) => { try { localStorage.setItem('fc.tester', JSON.stringify(o)); } catch { /* private mode */ } };
+
+function openFeedback(summary) {
+  state.fbFrom = summary ? 'summary' : 'start';
+  state.fbSummary = summary;
+  state.fbExercise = summary?.exercise ?? state.exercise;
+  state.fbAnswers = { ...remembered() };
+  $('fbErr').textContent = '';
+  $('fbPreview').hidden = true;
+  $('fbSub').textContent = summary
+    ? 'About 1 minute. The app\'s own numbers are filled in for you.'
+    : 'No set recorded in this session. Pick the exercise you tested and fill in what you saw.';
+  renderFeedbackForm();
+  show('feedback');
+  window.scrollTo(0, 0);
+}
+
+function renderFeedbackForm() {
+  const form = $('fbForm');
+  form.innerHTML = '';
+  form.style.display = 'flex'; form.style.flexDirection = 'column'; form.style.gap = '10px';
+  const a = state.fbAnswers;
+  if (!state.fbSummary) {
+    form.append(choiceQ({ id: '_ex', label: 'Exercise tested', options: ['Squat', 'Push-up', 'Plank'] },
+      { squat: 'Squat', pushup: 'Push-up', plank: 'Plank' }[state.fbExercise], (v) => {
+        state.fbExercise = { 'Squat': 'squat', 'Push-up': 'pushup', 'Plank': 'plank' }[v];
+        renderFeedbackForm();
+      }));
+  }
+  for (const q of questionsFor(state.fbExercise)) {
+    if (q.type === 'choice') { form.append(choiceQ(q, a[q.id], (v) => { a[q.id] = v; })); continue; }
+    const box = document.createElement('div'); box.className = 'q'; box.dataset.q = q.id;
+    const lab = document.createElement('label'); lab.textContent = q.label; lab.htmlFor = 'fb_' + q.id;
+    const inp = document.createElement(q.type === 'textarea' ? 'textarea' : 'input');
+    inp.id = 'fb_' + q.id;
+    if (q.type === 'number') { inp.type = 'number'; inp.inputMode = 'numeric'; inp.min = '0'; }
+    if (a[q.id] != null) inp.value = a[q.id];
+    inp.addEventListener('input', () => { a[q.id] = inp.value; box.classList.remove('missing'); });
+    box.append(lab, inp); form.append(box);
+  }
+}
+
+function choiceQ(q, current, onPick) {
+  const box = document.createElement('div'); box.className = 'q'; box.dataset.q = q.id;
+  const lab = document.createElement('div'); lab.className = 'ql'; lab.textContent = q.label;
+  const opts = document.createElement('div'); opts.className = 'opts'; opts.setAttribute('role', 'group');
+  for (const o of q.options) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'opt'; b.textContent = o;
+    b.setAttribute('aria-pressed', String(o === current));
+    b.addEventListener('click', () => {
+      for (const x of opts.children) x.setAttribute('aria-pressed', String(x === b));
+      box.classList.remove('missing'); onPick(o);
+    });
+    opts.append(b);
+  }
+  box.append(lab, opts); return box;
+}
+
+async function sendFeedback() {
+  const a = state.fbAnswers, ex = state.fbExercise;
+  const errs = validate(ex, a);
+  for (const el of document.querySelectorAll('#fbForm .q')) el.classList.remove('missing');
+  if (errs.length) {
+    for (const q of questionsFor(ex)) {
+      if (errs.some((e) => e.startsWith(q.label))) document.querySelector(`#fbForm [data-q="${q.id}"]`)?.classList.add('missing');
+    }
+    const other = errs.filter((e) => !questionsFor(ex).some((q) => e.startsWith(q.label)));
+    $('fbErr').textContent = other.length ? other.join('. ') + '.' : `Please answer the ${errs.length} question${errs.length > 1 ? 's' : ''} marked in red.`;
+    document.querySelector('#fbForm .missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  $('fbErr').textContent = '';
+  const keep = {}; for (const q of questionsFor(ex)) if (q.remember && a[q.id]) keep[q.id] = a[q.id];
+  remember(keep);
+  const now = new Date();
+  const report = buildReport(ex, state.fbSummary?.exercise === ex ? state.fbSummary : null, a, {
+    date: now.toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+    device: (navigator.userAgentData?.platform || '') + ' ' + (navigator.userAgent.match(/(Chrome|CriOS|Safari|Firefox|FxiOS)\/[\d.]+/)?.[0] ?? ''),
+  });
+  $('fbPreview').textContent = report;
+  $('fbPreview').hidden = false;
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Form Coach feedback', text: report }); $('fbErr').textContent = ''; return; }
+  } catch (e) { if (e?.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(report); $('fbErr').textContent = 'Copied. Paste it into WhatsApp or email to send it.'; }
+  catch { $('fbErr').textContent = 'Copy the text below and send it by WhatsApp or email.'; }
+}
+
 // Test hook (used by automated checks only).
-window.__formCoach = { state, render, renderSummary };
+window.__formCoach = { state, render, renderSummary, openFeedback };
 </script>
 </body>
 </html>
